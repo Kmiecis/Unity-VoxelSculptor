@@ -16,11 +16,11 @@ namespace Common.Voxels
 		private readonly Color RECTANGLE_GIZMO_COLOR = new Color(1.0f, 1.0f, 1.0f, 32.0f / 255.0f);
 		private readonly Color RECTANGLE_GIZMO_OUTLINE = new Color(0.0f, 0.0f, 0.0f, 128.0f / 255.0f);
 
-		[SerializeField] [SelectableField(0.1f, 0.25f, 0.5f, 1.0f)] private float m_Scale;
+		[SerializeField] private float m_Scale;
 		[SerializeField] private Color32 m_Color;
 
-		[SerializeField] private List<Vector3Int> m_Indices = new List<Vector3Int>();
-		[SerializeField] private List<Color32> m_Colors = new List<Color32>();
+		[SerializeField] /*[HideInInspector]*/ private List<Vector3Int> m_Indices = new List<Vector3Int>();
+		[SerializeField] /*[HideInInspector]*/ private List<Color32> m_Colors = new List<Color32>();
 
 		[SerializeField] [HideInInspector] private Bool3 m_MirrorAxes;
 
@@ -30,15 +30,17 @@ namespace Common.Voxels
 		private bool m_IsDirty;
 #pragma warning restore
 
-		private void AddIndex(Vector3Int index)
+		private bool TryAddIndex(Vector3Int index)
 		{
-			if (m_Indices.AddUnique(index))
+			var added = m_Indices.AddUnique(index);
+			if (added)
 			{
 				for (int d = 0; d < CubeUtility.DIRECTIONS.Length; d++)
 				{
 					m_Colors.Add(m_Color);
 				}
 			}
+			return added;
 		}
 
 		private void RemoveIndex(Vector3Int index)
@@ -120,42 +122,22 @@ namespace Common.Voxels
 				var vertices = mesh.vertices;
 				var colors = mesh.colors32;
 
-				for (int v = 0; v < vertices.Length; v += TriangleUtility.VCOUNT)
+				for (int v = 0; v < vertices.Length; v += TriangleUtility.VCOUNT * 2)
 				{
-					var minDistance = float.MaxValue;
-					var maxDistance = float.MinValue;
-					var maxv0 = Vector3.zero;
-					var maxv1 = Vector3.zero;
+					var v0 = vertices[v + 0];
+					var v1 = vertices[v + 1];
+					var v2 = vertices[v + 2];
 
-					for (int i0 = 0; i0 < TriangleUtility.VCOUNT; i0++)
-					{
-						var i1 = Mathx.NextIndex(i0, TriangleUtility.VCOUNT);
-
-						var v0 = vertices[v + i0];
-						var v1 = vertices[v + i1];
-
-						var distance = Vector3.SqrMagnitude(v1 - v0);
-						if (minDistance > distance)
-						{
-							minDistance = distance;
-						}
-						if (maxDistance < distance)
-						{
-							maxDistance = distance;
-							maxv0 = v0;
-							maxv1 = v1;
-						}
-					}
-
-					var normal = normals[v + 1];
-					var color = colors[v + 1];
-
-					var index = Vector3Int.RoundToInt((maxv0 + maxv1) * 0.5f / minDistance - normal * 0.5f);
+					var minDistance = Vector3.Magnitude(v1 - v0);
+					var maxDistance = Vector3.Magnitude(v0 - v2);
 
 					m_Scale = Mathf.Min(m_Scale, minDistance);
 
-					AddIndex(index);
+					var normal = normals[v + 1];
+					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - normal * 0.5f);
+					TryAddIndex(index);
 
+					var color = colors[v + 1];
 					var direction = Vector3Int.RoundToInt(normal);
 					if (CubeUtility.DIRECTIONS.TryGetIndex(direction, out int d))
 					{
@@ -396,7 +378,7 @@ namespace Common.Voxels
 				{
 					var index = Vector3Int.RoundToInt(localHitPoint / m_Scale + hitOffset);
 
-					AddIndex(index);
+					TryAddIndex(index);
 
 					void TryCreateMirrorVoxel()
 					{
@@ -405,7 +387,7 @@ namespace Common.Voxels
 							var mirror = index;
 							mirror *= -1;
 
-							AddIndex(mirror);
+							TryAddIndex(mirror);
 						}
 					}
 
@@ -416,7 +398,7 @@ namespace Common.Voxels
 							var mirror = index;
 							mirror[i] *= -1;
 
-							AddIndex(mirror);
+							TryAddIndex(mirror);
 						}
 					}
 
@@ -428,7 +410,7 @@ namespace Common.Voxels
 							mirror[a] *= -1;
 							mirror[b] *= -1;
 
-							AddIndex(mirror);
+							TryAddIndex(mirror);
 						}
 					}
 
@@ -481,14 +463,30 @@ namespace Common.Voxels
 			var flipper = Mathx.Select(Vector3Int.one, -Vector3Int.one, selector);
 
 			for (int i = 0; i < m_Indices.Count; i++)
-			{
-				m_Indices[i] = m_Indices[i] * flipper;
-			}
+				m_Indices[i] *= flipper;
+
+			WriteToCurrentMesh();
 
 			return null;
 		}
 
 #if UNITY_EDITOR
+		public bool showGizmos;
+
+		private void OnDrawGizmos()
+		{
+			if (showGizmos)
+			{
+				var previousColor = Gizmos.color;
+				Gizmos.color = Color.red;
+				foreach (var index in m_Indices)
+				{
+					Gizmos.DrawSphere(index, m_Scale * 0.5f);
+				}
+				Gizmos.color = previousColor;
+			}
+		}
+
 		private Mesh m_CachedMesh;
 		private float m_CachedScale;
 
@@ -526,7 +524,7 @@ namespace Common.Voxels
 
 			m_MirrorAxes = Bool3.False;
 
-			AddIndex(Vector3Int.zero);
+			TryAddIndex(Vector3Int.zero);
 			
 			WriteToCurrentMesh();
 		}
