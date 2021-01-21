@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -114,9 +115,12 @@ namespace Common.Voxels
 			if (TryGetComponent(out MeshFilter meshFilter))
 			{
 				var mesh = meshFilter.sharedMesh;
-
+				
 				m_Indices.Clear();
 				m_Colors.Clear();
+
+				var bounds = new Range3Int(Vector3Int.one * int.MaxValue, Vector3Int.one * int.MinValue);
+				var indicesNormals = new Dictionary<Vector3Int, HashSet<Vector3Int>>();
 
 				var normals = mesh.normals;
 				var vertices = mesh.vertices;
@@ -133,16 +137,51 @@ namespace Common.Voxels
 
 					m_Scale = Mathf.Min(m_Scale, minDistance);
 
-					var normal = normals[v + 1];
-					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - normal * 0.5f);
+					var normal = Vector3Int.RoundToInt(normals[v + 1]);
+					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Multiply(normal, 0.5f));
 					TryAddIndex(index);
-
-					var color = colors[v + 1];
-					var direction = Vector3Int.RoundToInt(normal);
-					if (CubeUtility.DIRECTIONS.TryGetIndex(direction, out int d))
+					
+					if (CubeUtility.DIRECTIONS.TryGetIndex(normal, out int d))
 					{
 						var c = (m_Indices.Count - 1) * CubeUtility.DIRECTIONS.Length + d;
-						m_Colors[c] = color;
+						m_Colors[c] = colors[v + 1];
+					}
+
+					bounds.min = Mathx.Min(bounds.min, index);
+					bounds.max = Mathx.Max(bounds.max, index);
+
+					if (!indicesNormals.ContainsKey(index))
+						indicesNormals.Add(index, new HashSet<Vector3Int>());
+					indicesNormals[index].Add(normal);
+				}
+				
+				// Add fake indices inside mesh
+				for (int z = bounds.min.z; z < bounds.max.z; z++)
+				{
+					for (int y = bounds.min.y; y < bounds.max.y; y++)
+					{
+						for (int x = bounds.min.x; x < bounds.max.x; x++)
+						{
+							var index = new Vector3Int(x, y, z);
+							
+							if (indicesNormals.TryGetValue(index, out HashSet<Vector3Int> indexNormals))
+							{
+								for (int a = 0; a < AxisUtility.AXES.Length; a++)
+								{
+									var axis = AxisUtility.AXES[a];
+
+									if (!indexNormals.Contains(axis))
+									{
+										var nextIndex = index + axis;
+
+										if (!indicesNormals.ContainsKey(nextIndex))
+											indicesNormals.Add(nextIndex, new HashSet<Vector3Int>());
+
+										TryAddIndex(nextIndex);
+									}
+								}
+							}
+						}
 					}
 				}
 			}
