@@ -36,7 +36,7 @@ namespace Common.Voxels
 			var added = m_Indices.AddUnique(index);
 			if (added)
 			{
-				for (int d = 0; d < CubeUtility.DIRECTIONS.Length; d++)
+				for (int d = 0; d < CartesianUtility.Directions3D.Length; d++)
 				{
 					m_Colors.Add(m_Color);
 				}
@@ -49,7 +49,7 @@ namespace Common.Voxels
 			if (m_Indices.TryGetIndex(index, out int i))
 			{
 				m_Indices.RemoveAt(i);
-				m_Colors.RemoveRange(i * CubeUtility.DIRECTIONS.Length, CubeUtility.DIRECTIONS.Length);
+				m_Colors.RemoveRange(i * CartesianUtility.Directions3D.Length, CartesianUtility.Directions3D.Length);
 			}
 		}
 
@@ -78,22 +78,22 @@ namespace Common.Voxels
 				{
 					var index = m_Indices[i];
 
-					for (int d = 0; d < CubeUtility.DIRECTIONS.Length; d++)
+					for (int d = 0; d < CartesianUtility.Directions3D.Length; d++)
 					{
-						var direction = CubeUtility.DIRECTIONS[d];
+						var direction = CartesianUtility.Directions3D[d];
 						var neighbour = Vector3Int.RoundToInt(index + direction);
 
 						if (!m_Indices.Contains(neighbour))
 						{
-							var c = i * CubeUtility.DIRECTIONS.Length + d;
+							var c = i * CartesianUtility.Directions3D.Length + d;
 							var color = m_Colors[c];
 
-							var triangles = CubeUtility.TRIANGLES[d];
+							var triangles = CubeUtility.Triangles[d];
 							for (int t = 0; triangles[t] != -1; t += 3)
 							{
-								var v0 = (index + CubeUtility.VERTICES[triangles[t + 0]]) * m_Scale;
-								var v1 = (index + CubeUtility.VERTICES[triangles[t + 1]]) * m_Scale;
-								var v2 = (index + CubeUtility.VERTICES[triangles[t + 2]]) * m_Scale;
+								var v0 = (index + CubeUtility.Vertices[triangles[t + 0]]) * m_Scale;
+								var v1 = (index + CubeUtility.Vertices[triangles[t + 1]]) * m_Scale;
+								var v2 = (index + CubeUtility.Vertices[triangles[t + 2]]) * m_Scale;
 
 								meshBuilder.AddTriangle(v0, v1, v2);
 								meshBuilder.AddColors(color, color, color);
@@ -141,9 +141,9 @@ namespace Common.Voxels
 					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Multiply(normal, 0.5f));
 					TryAddIndex(index);
 					
-					if (CubeUtility.DIRECTIONS.TryGetIndex(normal, out int d))
+					if (CartesianUtility.Directions3D.TryGetIndex(normal, out int d))
 					{
-						var c = (m_Indices.Count - 1) * CubeUtility.DIRECTIONS.Length + d;
+						var c = (m_Indices.Count - 1) * CartesianUtility.Directions3D.Length + d;
 						m_Colors[c] = colors[v + 1];
 					}
 
@@ -166,10 +166,8 @@ namespace Common.Voxels
 							
 							if (indicesNormals.TryGetValue(index, out HashSet<Vector3Int> indexNormals))
 							{
-								for (int a = 0; a < AxisUtility.AXES.Length; a++)
+								foreach (var axis in CartesianUtility.Axes3D)
 								{
-									var axis = AxisUtility.AXES[a];
-
 									if (!indexNormals.Contains(axis))
 									{
 										var nextIndex = index + axis;
@@ -481,9 +479,9 @@ namespace Common.Voxels
 
 				if (
 					m_Indices.TryGetIndex(index, out int i) &&
-					CubeUtility.DIRECTIONS.TryGetIndex(direction, out int d)
+					CartesianUtility.Directions3D.TryGetIndex(direction, out int d)
 				) {
-					var c = i * CubeUtility.DIRECTIONS.Length + d;
+					var c = i * CartesianUtility.Directions3D.Length + d;
 					var currentColor = m_Colors[c];
 
 					if (Utility.TryUpdate(ref currentColor, m_Color))
