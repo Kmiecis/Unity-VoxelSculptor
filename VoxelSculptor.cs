@@ -46,7 +46,7 @@ namespace Common.Voxels
 
 		private void RemoveIndex(Vector3Int index)
 		{
-			if (m_Indices.TryGetIndex(index, out int i))
+			if (m_Indices.TryIndexOf(index, out int i))
 			{
 				m_Indices.RemoveAt(i);
 				m_Colors.RemoveRange(i * CartesianUtility.Directions3D.Length, CartesianUtility.Directions3D.Length);
@@ -141,7 +141,7 @@ namespace Common.Voxels
 					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Multiply(normal, 0.5f));
 					TryAddIndex(index);
 					
-					if (CartesianUtility.Directions3D.TryGetIndex(normal, out int d))
+					if (CartesianUtility.Directions3D.TryIndexOf(normal, out int d))
 					{
 						var c = (m_Indices.Count - 1) * CartesianUtility.Directions3D.Length + d;
 						m_Colors[c] = colors[v + 1];
@@ -478,8 +478,8 @@ namespace Common.Voxels
 				var direction = Vector3Int.RoundToInt(hitNormal);
 
 				if (
-					m_Indices.TryGetIndex(index, out int i) &&
-					CartesianUtility.Directions3D.TryGetIndex(direction, out int d)
+					m_Indices.TryIndexOf(index, out int i) &&
+					CartesianUtility.Directions3D.TryIndexOf(direction, out int d)
 				) {
 					var c = i * CartesianUtility.Directions3D.Length + d;
 					var currentColor = m_Colors[c];
@@ -554,7 +554,7 @@ namespace Common.Voxels
 		private void Reset()
 		{
 			m_Scale = 1.0f;
-			m_Color = ColorUtility.WHITE;
+			m_Color = Color.white;
 
 			m_Indices.Clear();
 			m_Colors.Clear();
@@ -562,7 +562,8 @@ namespace Common.Voxels
 			m_MirrorAxes = Bool3.False;
 
 			TryAddIndex(Vector3Int.zero);
-			
+
+			m_CachedMesh = CreateNewCurrentMesh();
 			WriteToCurrentMesh();
 		}
 #endif
