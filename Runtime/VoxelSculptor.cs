@@ -1,5 +1,6 @@
+using Common.Extensions;
+using Common.Mathematics;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -14,31 +15,35 @@ namespace Common.Voxels
 	[RequireComponent(typeof(MeshCollider))]
 	public class VoxelSculptor : MonoBehaviour
 	{
-		private readonly Color RECTANGLE_GIZMO_COLOR = new Color(1.0f, 1.0f, 1.0f, 32.0f / 255.0f);
-		private readonly Color RECTANGLE_GIZMO_OUTLINE = new Color(0.0f, 0.0f, 0.0f, 128.0f / 255.0f);
+		private readonly Color kRectGizmoColor = new Color(1.0f, 1.0f, 1.0f, 32.0f / 255.0f);
+		private readonly Color kRectGizmoOutline = new Color(0.0f, 0.0f, 0.0f, 128.0f / 255.0f);
 
-		[SerializeField] private float m_Scale;
-		[SerializeField] private Color32 m_Color;
+		[SerializeField] [HideInInspector]
+		private List<Vector3Int> _indices = new List<Vector3Int>();
+		[SerializeField] [HideInInspector]
+		private List<Color32> _colors = new List<Color32>();
 
-		[SerializeField] /*[HideInInspector]*/ private List<Vector3Int> m_Indices = new List<Vector3Int>();
-		[SerializeField] /*[HideInInspector]*/ private List<Color32> m_Colors = new List<Color32>();
-
-		[SerializeField] [HideInInspector] private Bool3 m_MirrorAxes;
+		[SerializeField] [HideInInspector]
+		private float _scale = 1.0f;
+		[SerializeField] [HideInInspector]
+		private Color32 _color;
+		[SerializeField] [HideInInspector]
+		private Bool3 _mirrorAxes;
 
 #pragma warning disable 0649
-		private bool m_IsSculpting;
-		private bool m_IsPainting;
-		private bool m_IsDirty;
+		private bool _isSculpting;
+		private bool _isPainting;
+		private bool _isDirty;
 #pragma warning restore
 
 		private bool TryAddIndex(Vector3Int index)
 		{
-			var added = m_Indices.AddUnique(index);
+			var added = _indices.AddUnique(index);
 			if (added)
 			{
-				for (int d = 0; d < CartesianUtility.Directions3D.Length; d++)
+				for (int d = 0; d < Axes.All3D.Length; d++)
 				{
-					m_Colors.Add(m_Color);
+					_colors.Add(_color);
 				}
 			}
 			return added;
@@ -46,10 +51,10 @@ namespace Common.Voxels
 
 		private void RemoveIndex(Vector3Int index)
 		{
-			if (m_Indices.TryIndexOf(index, out int i))
+			if (_indices.TryIndexOf(index, out int i))
 			{
-				m_Indices.RemoveAt(i);
-				m_Colors.RemoveRange(i * CartesianUtility.Directions3D.Length, CartesianUtility.Directions3D.Length);
+				_indices.RemoveAt(i);
+				_colors.RemoveRange(i * Axes.All3D.Length, Axes.All3D.Length);
 			}
 		}
 
@@ -58,7 +63,8 @@ namespace Common.Voxels
 			if (
 				TryGetComponent(out MeshFilter meshFilter) &&
 				TryGetComponent(out MeshCollider meshCollider)
-			) {
+			)
+			{
 				return meshCollider.sharedMesh = meshFilter.sharedMesh = new Mesh();
 			}
 			return null;
@@ -69,34 +75,37 @@ namespace Common.Voxels
 			if (
 				TryGetComponent(out MeshFilter meshFilter) &&
 				TryGetComponent(out MeshCollider meshCollider)
-			) {
+			)
+			{
 				var mesh = meshFilter.sharedMesh;
 
 				var meshBuilder = new FlatMeshBuilder();
 
-				for (int i = 0; i < m_Indices.Count; i++)
+				for (int i = 0; i < _indices.Count; i++)
 				{
-					var index = m_Indices[i];
+					var index = _indices[i];
 
-					for (int d = 0; d < CartesianUtility.Directions3D.Length; d++)
+					for (int d = 0; d < Axes.All3D.Length; d++)
 					{
-						var direction = CartesianUtility.Directions3D[d];
+						var direction = Axes.All3D[d];
 						var neighbour = Vector3Int.RoundToInt(index + direction);
 
-						if (!m_Indices.Contains(neighbour))
+						if (!_indices.Contains(neighbour))
 						{
-							var c = i * CartesianUtility.Directions3D.Length + d;
-							var color = m_Colors[c];
+							var c = i * Axes.All3D.Length + d;
+							var color = _colors[c];
 
-							var triangles = CubeUtility.Triangles[d];
+							var triangles = Cubes.Triangles[d];
 							for (int t = 0; triangles[t] != -1; t += 3)
 							{
-								var v0 = (index + CubeUtility.Vertices[triangles[t + 0]]) * m_Scale;
-								var v1 = (index + CubeUtility.Vertices[triangles[t + 1]]) * m_Scale;
-								var v2 = (index + CubeUtility.Vertices[triangles[t + 2]]) * m_Scale;
+								var v0 = (index + Cubes.Vertices[triangles[t + 0]]) * _scale;
+								var v1 = (index + Cubes.Vertices[triangles[t + 1]]) * _scale;
+								var v2 = (index + Cubes.Vertices[triangles[t + 2]]) * _scale;
 
-								meshBuilder.AddTriangle(v0, v1, v2);
-								meshBuilder.AddColors(color, color, color);
+								meshBuilder.AddTriangle(
+									v0, v1, v2,
+									color, color, color
+								);
 							}
 						}
 					}
@@ -106,7 +115,7 @@ namespace Common.Voxels
 
 				meshCollider.sharedMesh = mesh; // Only because mesh has to be updated in physics cache
 
-				m_IsDirty = true;
+				_isDirty = true;
 			}
 		}
 
@@ -115,18 +124,19 @@ namespace Common.Voxels
 			if (TryGetComponent(out MeshFilter meshFilter))
 			{
 				var mesh = meshFilter.sharedMesh;
-				
-				m_Indices.Clear();
-				m_Colors.Clear();
 
-				var bounds = new Range3Int(Vector3Int.one * int.MaxValue, Vector3Int.one * int.MinValue);
+				_indices.Clear();
+				_colors.Clear();
+
+				var bounds = Range3Int.Empty;
 				var indicesNormals = new Dictionary<Vector3Int, HashSet<Vector3Int>>();
 
 				var normals = mesh.normals;
 				var vertices = mesh.vertices;
 				var colors = mesh.colors32;
 
-				for (int v = 0; v < vertices.Length; v += TriangleUtility.VCOUNT * 2)
+				const int kFaceVertexCount = 6;
+				for (int v = 0; v < vertices.Length; v += kFaceVertexCount)
 				{
 					var v0 = vertices[v + 0];
 					var v1 = vertices[v + 1];
@@ -135,16 +145,16 @@ namespace Common.Voxels
 					var minDistance = Vector3.Magnitude(v1 - v0);
 					var maxDistance = Vector3.Magnitude(v0 - v2);
 
-					m_Scale = Mathf.Min(m_Scale, minDistance);
+					_scale = Mathf.Min(_scale, minDistance);
 
 					var normal = Vector3Int.RoundToInt(normals[v + 1]);
-					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Multiply(normal, 0.5f));
+					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Mul(normal, 0.5f));
 					TryAddIndex(index);
-					
-					if (CartesianUtility.Directions3D.TryIndexOf(normal, out int d))
+
+					if (Axes.All3D.TryIndexOf(normal, out int d))
 					{
-						var c = (m_Indices.Count - 1) * CartesianUtility.Directions3D.Length + d;
-						m_Colors[c] = colors[v + 1];
+						var c = (_indices.Count - 1) * Axes.All3D.Length + d;
+						_colors[c] = colors[v + 1];
 					}
 
 					bounds.min = Mathx.Min(bounds.min, index);
@@ -154,7 +164,7 @@ namespace Common.Voxels
 						indicesNormals.Add(index, new HashSet<Vector3Int>());
 					indicesNormals[index].Add(normal);
 				}
-				
+
 				// Add fake indices inside mesh
 				for (int z = bounds.min.z; z < bounds.max.z; z++)
 				{
@@ -163,10 +173,10 @@ namespace Common.Voxels
 						for (int x = bounds.min.x; x < bounds.max.x; x++)
 						{
 							var index = new Vector3Int(x, y, z);
-							
+
 							if (indicesNormals.TryGetValue(index, out HashSet<Vector3Int> indexNormals))
 							{
-								foreach (var axis in CartesianUtility.Axes3D)
+								foreach (var axis in Axes.Positive3D)
 								{
 									if (!indexNormals.Contains(axis))
 									{
@@ -184,10 +194,10 @@ namespace Common.Voxels
 				}
 			}
 		}
-		
+
 		public bool CanSave()
 		{
-			return m_IsDirty;
+			return _isDirty;
 		}
 
 		public void Save()
@@ -210,52 +220,52 @@ namespace Common.Voxels
 				AssetDatabase.SaveAssets();
 			}
 
-			m_IsDirty = false;
+			_isDirty = false;
 		}
 
 		public bool IsSculpting()
 		{
-			return m_IsSculpting;
+			return _isSculpting;
 		}
 
 		public string BeginSculpting()
 		{
-			if (m_IsSculpting)
+			if (_isSculpting)
 				return "Couldn't begin sculpting. Already sculpting";
-			
-			m_IsSculpting = true;
+
+			_isSculpting = true;
 			return null;
 		}
 
 		public string EndSculpting()
 		{
-			if (!m_IsSculpting)
+			if (!_isSculpting)
 				return "Couldn't end sculpting. Not sculpting";
-			
-			m_IsSculpting = false;
+
+			_isSculpting = false;
 			return null;
 		}
 
 		public bool IsPainting()
 		{
-			return m_IsPainting;
+			return _isPainting;
 		}
 
 		public string BeginPainting()
 		{
-			if (m_IsPainting)
+			if (_isPainting)
 				return "Couldn't begin painting. Already painting";
 
-			m_IsPainting = true;
+			_isPainting = true;
 			return null;
 		}
 
 		public string EndPainting()
 		{
-			if (!m_IsPainting)
+			if (!_isPainting)
 				return "Couldn't end painting. Not painting";
 
-			m_IsPainting = false;
+			_isPainting = false;
 			return null;
 		}
 
@@ -272,7 +282,7 @@ namespace Common.Voxels
 
 				case EventType.Repaint:
 					DrawRectangleGizmo(currentEvent.mousePosition);
-					if (m_IsSculpting)
+					if (_isSculpting)
 						DrawMirrorAxesGizmo();
 					break;
 
@@ -283,9 +293,9 @@ namespace Common.Voxels
 				case EventType.MouseDown:
 					if (currentEvent.button == LEFT_MOUSE_BUTTON)
 					{
-						if (m_IsSculpting)
+						if (_isSculpting)
 							Sculpt(currentEvent.mousePosition, currentEvent.shift);
-						else if (m_IsPainting)
+						else if (_isPainting)
 							Paint(currentEvent.mousePosition);
 						currentEvent.Use();
 					}
@@ -294,7 +304,7 @@ namespace Common.Voxels
 				case EventType.MouseDrag:
 					if (currentEvent.button == LEFT_MOUSE_BUTTON)
 					{
-						if (m_IsPainting)
+						if (_isPainting)
 							Paint(currentEvent.mousePosition);
 						currentEvent.Use();
 					}
@@ -307,50 +317,54 @@ namespace Common.Voxels
 			var ray = HandleUtility.GUIPointToWorldRay(mousePosition);
 			if (Physics.Raycast(ray, out RaycastHit hit))
 			{
-				var hitPoint = hit.point;
+				var hitPoint = hit.point / _scale;
+				var hitOffset = hit.transform.position / _scale;
 				var hitNormal = hit.normal;
 
-				var hitOffset = hitNormal * 0.5f;
-
-				var hitPointGrided = (Mathx.Round(hitPoint / m_Scale + hitOffset) - hitOffset) * m_Scale;
-				var rect3D = RectUtility.GetRect3D(hitPointGrided, hitNormal, m_Scale, m_Scale);
+				var rectOffset = hitNormal * 0.5f - hitOffset;
+				var rectPosition = (Mathx.Round(hitPoint + rectOffset) - rectOffset) * _scale;
+				var rectRotation = Quaternion.FromToRotation(Vector3.up, hitNormal);
+				var rectScale = Vector3.one * _scale;
+				var rect3D = Rects.GetVertices(rectPosition, rectScale, rectRotation);
 
 				Handles.zTest = CompareFunction.Always;
-				Handles.DrawSolidRectangleWithOutline(rect3D, RECTANGLE_GIZMO_COLOR, RECTANGLE_GIZMO_OUTLINE);
+				Handles.DrawSolidRectangleWithOutline(rect3D, kRectGizmoColor, kRectGizmoOutline);
 			}
 		}
 
 		private void DrawMirrorAxesGizmo()
 		{
-			if (m_MirrorAxes.Any())
+			if (_mirrorAxes.Any())
 			{
-				var range = new Range3Int(Vector3Int.one * int.MaxValue, Vector3Int.one * int.MinValue);
-				foreach (var index in m_Indices)
+				var range = Range3Int.Empty;
+				foreach (var index in _indices)
 				{
 					range.min = Mathx.Min(range.min, index);
 					range.max = Mathx.Max(range.max, index);
 				}
 
-				var center = range.Center * m_Scale;
-				var extents = Mathx.Multiply((range.Extents + Vector3Int.one * 2), m_Scale);
+				var center = range.Center * _scale;
+				var extents = Mathx.Mul((range.Extents + Vector3Int.one * 2), _scale);
 
 				for (int i = 0; i < 3; ++i)
 				{
-					if (m_MirrorAxes[i])
+					if (_mirrorAxes[i])
 					{
 						var selector = new Bool3(i == 0, i == 1, i == 2);
-						var axisCenter = Mathx.Multiply(center, Mathx.Select(Vector3.one, Vector3.zero, selector));
+						var axisCenter = Mathx.Mul(center, Mathx.Select(Vector3.one, Vector3.zero, selector));
 						var axisNormal = Mathx.Select(Vector3.zero, Vector3.one, selector);
-						var rectSize = new Vector2(i == 0 ? extents.y : extents.x, i == 2 ? extents.y : extents.z);
-						var rect3D = RectUtility.GetRect3D(axisCenter, axisNormal, rectSize);
+						var rectPosition = axisCenter + this.transform.position;
+						var rectSize = new Vector3(i == 0 ? extents.y : extents.x, 0.0f, i == 2 ? extents.y : extents.z);
+						var rectRotation = Quaternion.FromToRotation(Vector3.up, axisNormal);
+						var rect3D = Rects.GetVertices(rectPosition, rectSize, rectRotation);
 
 						Handles.zTest = CompareFunction.Less;
-						Handles.DrawSolidRectangleWithOutline(rect3D, new Color(axisNormal.x, axisNormal.y, axisNormal.z, 32.0f / 255.0f), RECTANGLE_GIZMO_OUTLINE);
+						Handles.DrawSolidRectangleWithOutline(rect3D, new Color(axisNormal.x, axisNormal.y, axisNormal.z, 32.0f / 255.0f), kRectGizmoOutline);
 					}
 				}
 			}
 		}
-		
+
 		private void Sculpt(Vector2 mousePosition, bool remove)
 		{
 			var ray = HandleUtility.GUIPointToWorldRay(mousePosition);
@@ -358,21 +372,19 @@ namespace Common.Voxels
 			{
 				const int AXES_COUNT = 3;
 
-				var hitPoint = hit.point;
+				var hitPoint = hit.transform.InverseTransformPoint(hit.point) / _scale;
 				var hitNormal = hit.normal;
-
-				var localHitPoint = this.transform.InverseTransformPoint(hitPoint);
 				var hitOffset = hitNormal * 0.5f;
 
 				if (remove)
 				{
-					var index = Vector3Int.RoundToInt(localHitPoint / m_Scale - hitOffset);
+					var index = Vector3Int.RoundToInt(hitPoint - hitOffset);
 
 					RemoveIndex(index);
 
 					void TryRemoveMirrorVoxel()
 					{
-						if (m_MirrorAxes.x && m_MirrorAxes.y && m_MirrorAxes.z)
+						if (_mirrorAxes.x && _mirrorAxes.y && _mirrorAxes.z)
 						{
 							var mirror = index;
 							mirror *= -1;
@@ -383,7 +395,7 @@ namespace Common.Voxels
 
 					void TryRemoveMirrorVoxelByAxis(int i)
 					{
-						if (m_MirrorAxes[i] && index[i] != 0)
+						if (_mirrorAxes[i] && index[i] != 0)
 						{
 							var mirror = index;
 							mirror[i] *= -1;
@@ -394,7 +406,7 @@ namespace Common.Voxels
 
 					void TryRemoveMirrorVoxelByAxes(int a, int b)
 					{
-						if (m_MirrorAxes[a] && m_MirrorAxes[b] && (index[a] != 0 || index[b] != 0))
+						if (_mirrorAxes[a] && _mirrorAxes[b] && (index[a] != 0 || index[b] != 0))
 						{
 							var mirror = index;
 							mirror[a] *= -1;
@@ -413,13 +425,13 @@ namespace Common.Voxels
 				}
 				else
 				{
-					var index = Vector3Int.RoundToInt(localHitPoint / m_Scale + hitOffset);
+					var index = Vector3Int.RoundToInt(hitPoint + hitOffset);
 
 					TryAddIndex(index);
 
 					void TryCreateMirrorVoxel()
 					{
-						if (m_MirrorAxes.x && m_MirrorAxes.y && m_MirrorAxes.z)
+						if (_mirrorAxes.All())
 						{
 							var mirror = index;
 							mirror *= -1;
@@ -430,7 +442,7 @@ namespace Common.Voxels
 
 					void TryCreateMirrorVoxelByAxis(int i)
 					{
-						if (m_MirrorAxes[i] && index[i] != 0)
+						if (_mirrorAxes[i] && index[i] != 0)
 						{
 							var mirror = index;
 							mirror[i] *= -1;
@@ -441,7 +453,7 @@ namespace Common.Voxels
 
 					void TryCreateMirrorVoxelByAxes(int a, int b)
 					{
-						if (m_MirrorAxes[a] && m_MirrorAxes[b] && (index[a] != 0 || index[b] != 0))
+						if (_mirrorAxes[a] && _mirrorAxes[b] && (index[a] != 0 || index[b] != 0))
 						{
 							var mirror = index;
 							mirror[a] *= -1;
@@ -468,25 +480,24 @@ namespace Common.Voxels
 			var ray = HandleUtility.GUIPointToWorldRay(mousePosition);
 			if (Physics.Raycast(ray, out RaycastHit hit))
 			{
-				var hitPoint = hit.point;
+				var hitPoint = hit.transform.InverseTransformPoint(hit.point) / _scale;
 				var hitNormal = hit.normal;
-
-				var localHitPoint = this.transform.InverseTransformPoint(hitPoint);
 				var hitOffset = hitNormal * 0.5f;
 
-				var index = Vector3Int.RoundToInt(localHitPoint / m_Scale - hitOffset);
+				var index = Vector3Int.RoundToInt(hitPoint - hitOffset);
 				var direction = Vector3Int.RoundToInt(hitNormal);
 
 				if (
-					m_Indices.TryIndexOf(index, out int i) &&
-					CartesianUtility.Directions3D.TryIndexOf(direction, out int d)
-				) {
-					var c = i * CartesianUtility.Directions3D.Length + d;
-					var currentColor = m_Colors[c];
+					_indices.TryIndexOf(index, out int i) &&
+					Axes.All3D.TryIndexOf(direction, out int d)
+				)
+				{
+					var c = i * Axes.All3D.Length + d;
+					var currentColor = _colors[c];
 
-					if (Utility.TryUpdate(ref currentColor, m_Color))
+					if (Utility.TryUpdate(ref currentColor, _color))
 					{
-						m_Colors[c] = currentColor;
+						_colors[c] = currentColor;
 
 						WriteToCurrentMesh();
 					}
@@ -499,15 +510,14 @@ namespace Common.Voxels
 			var selector = new Bool3(x, y, z);
 			var flipper = Mathx.Select(Vector3Int.one, -Vector3Int.one, selector);
 
-			for (int i = 0; i < m_Indices.Count; i++)
-				m_Indices[i] *= flipper;
+			for (int i = 0; i < _indices.Count; i++)
+				_indices[i] *= flipper;
 
 			WriteToCurrentMesh();
 
 			return null;
 		}
 
-#if UNITY_EDITOR
 		public bool showGizmos;
 
 		private void OnDrawGizmos()
@@ -516,9 +526,9 @@ namespace Common.Voxels
 			{
 				var previousColor = Gizmos.color;
 				Gizmos.color = Color.red;
-				foreach (var index in m_Indices)
+				foreach (var index in _indices)
 				{
-					Gizmos.DrawSphere(index, m_Scale * 0.5f);
+					Gizmos.DrawSphere(index, _scale * 0.5f);
 				}
 				Gizmos.color = previousColor;
 			}
@@ -529,7 +539,10 @@ namespace Common.Voxels
 
 		private void Update()
 		{
-			if (TryGetComponent(out MeshFilter meshFilter) && TryGetComponent(out MeshCollider meshCollider))
+			if (
+				TryGetComponent(out MeshFilter meshFilter) &&
+				TryGetComponent(out MeshCollider meshCollider)
+			)
 			{
 				if (Utility.TryUpdate(ref m_CachedMesh, meshFilter.sharedMesh))
 				{
@@ -541,10 +554,11 @@ namespace Common.Voxels
 					else
 					{
 						ReadFromCurrentMesh();
+						meshCollider.sharedMesh = m_CachedMesh;
 					}
 				}
 
-				if (Utility.TryUpdate(ref m_CachedScale, m_Scale))
+				if (Utility.TryUpdate(ref m_CachedScale, _scale))
 				{
 					WriteToCurrentMesh();
 				}
@@ -553,20 +567,19 @@ namespace Common.Voxels
 
 		private void Reset()
 		{
-			m_Scale = 1.0f;
-			m_Color = Color.white;
+			_scale = 1.0f;
+			_color = Color.white;
 
-			m_Indices.Clear();
-			m_Colors.Clear();
+			_indices.Clear();
+			_colors.Clear();
 
-			m_MirrorAxes = Bool3.False;
+			_mirrorAxes = Bool3.False;
 
 			TryAddIndex(Vector3Int.zero);
 
 			m_CachedMesh = CreateNewCurrentMesh();
 			WriteToCurrentMesh();
 		}
-#endif
 	}
 #else
 	public class VoxelSculptor : MonoBehaviour

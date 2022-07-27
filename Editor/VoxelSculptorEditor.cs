@@ -7,81 +7,89 @@ namespace CommonEditor.Voxels
 	[CustomEditor(typeof(VoxelSculptor))]
 	public class VoxelSculptorEditor : Editor
 	{
-		private string m_Error;
-		private VoxelSculptor m_Script;
+		private string _error;
 
-		private SerializedProperty m_MirrorAxesProperty;
+		private SerializedProperty _scaleProperty;
+		private SerializedProperty _colorProperty;
+		private SerializedProperty _mirrorAxesProperty;
+
+		private VoxelSculptor Script
+        {
+			get => (VoxelSculptor)target;
+        }
 		
 		private void OnEnable()
 		{
-			m_Script = (VoxelSculptor)target;
-
-			m_MirrorAxesProperty = serializedObject.FindProperty("m_MirrorAxes");
+			_scaleProperty = serializedObject.FindProperty("_scale");
+			_colorProperty = serializedObject.FindProperty("_color");
+			_mirrorAxesProperty = serializedObject.FindProperty("_mirrorAxes");
 		}
 
 		public override void OnInspectorGUI()
 		{
-			base.OnInspectorGUI();
-
 			serializedObject.Update();
 
-			if (!string.IsNullOrEmpty(m_Error))
+			if (!string.IsNullOrEmpty(_error))
 			{
-				EditorGUILayout.HelpBox(m_Error, MessageType.Error);
+				EditorGUILayout.HelpBox(_error, MessageType.Error);
 			}
 
-			if (m_Script.IsSculpting())
+			EditorGUILayout.PropertyField(_scaleProperty);
+
+			if (Script.IsSculpting())
 			{
 				GUI.color = Color.green;
 				if (GUILayout.Button("End Sculpting"))
 				{
-					m_Error = m_Script.EndSculpting();
+					_error = Script.EndSculpting();
 				}
 				GUI.color = Color.white;
 
 				EditorGUILayout.BeginHorizontal();
 				if (GUILayout.Button("Flip X"))
 				{
-					m_Error = m_Script.Flip(x: true);
+					_error = Script.Flip(x: true);
 				}
 				if (GUILayout.Button("Flip Y"))
 				{
-					m_Error = m_Script.Flip(y: true);
+					_error = Script.Flip(y: true);
 				}
 				if (GUILayout.Button("Flip Z"))
 				{
-					m_Error = m_Script.Flip(z: true);
+					_error = Script.Flip(z: true);
 				}
 				EditorGUILayout.EndHorizontal();
 
-				EditorGUILayout.PropertyField(m_MirrorAxesProperty);
+				EditorGUILayout.PropertyField(_mirrorAxesProperty);
 			}
-			else if (m_Script.IsPainting())
+			else if (Script.IsPainting())
 			{
 				GUI.color = Color.green;
 				if (GUILayout.Button("End Painting"))
 				{
-					m_Error = m_Script.EndPainting();
+					_error = Script.EndPainting();
 				}
 				GUI.color = Color.white;
+
+				EditorGUILayout.PropertyField(_colorProperty);
 			}
 			else
 			{
 				if (GUILayout.Button("Begin Sculpting"))
 				{
-					m_Error = m_Script.BeginSculpting();
+					_error = Script.BeginSculpting();
 				}
 
 				if (GUILayout.Button("Begin Painting"))
 				{
-					m_Error = m_Script.BeginPainting();
+					_error = Script.BeginPainting();
 				}
 
-				if (m_Script.CanSave())
+				if (Script.CanSave())
 				{
 					if (GUILayout.Button("Save"))
 					{
-						m_Script.Save();
+						Script.Save();
 					}
 				}
 			}
@@ -91,9 +99,9 @@ namespace CommonEditor.Voxels
 
 		private void OnSceneGUI()
 		{
-			if (m_Script.IsSculpting() || m_Script.IsPainting())
+			if (Script.IsSculpting() || Script.IsPainting())
 			{
-				m_Script.OnSceneGUI();
+				Script.OnSceneGUI();
 			}
 		}
 	}
