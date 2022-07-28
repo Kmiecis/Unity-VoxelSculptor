@@ -34,6 +34,9 @@ namespace Common.Voxels
 		private bool _isSculpting;
 		private bool _isPainting;
 		private bool _isDirty;
+
+		private Mesh _cachedMesh;
+		private float _cachedScale;
 #pragma warning restore
 
 		private bool TryAddIndex(Vector3Int index)
@@ -72,121 +75,111 @@ namespace Common.Voxels
 
 		private void WriteToCurrentMesh()
 		{
-			if (
-				TryGetComponent(out MeshFilter meshFilter) &&
-				TryGetComponent(out MeshCollider meshCollider)
-			)
+			var meshBuilder = new FlatMeshBuilder();
+
+			for (int i = 0; i < _indices.Count; i++)
 			{
-				var mesh = meshFilter.sharedMesh;
+				var index = _indices[i];
 
-				var meshBuilder = new FlatMeshBuilder();
-
-				for (int i = 0; i < _indices.Count; i++)
+				for (int d = 0; d < Axes.All3D.Length; d++)
 				{
-					var index = _indices[i];
+					var direction = Axes.All3D[d];
+					var neighbour = Vector3Int.RoundToInt(index + direction);
 
-					for (int d = 0; d < Axes.All3D.Length; d++)
+					if (!_indices.Contains(neighbour))
 					{
-						var direction = Axes.All3D[d];
-						var neighbour = Vector3Int.RoundToInt(index + direction);
+						var c = i * Axes.All3D.Length + d;
+						var color = _colors[c];
 
-						if (!_indices.Contains(neighbour))
+						var triangles = Cubes.Triangles[d];
+						for (int t = 0; triangles[t] != -1; t += 3)
 						{
-							var c = i * Axes.All3D.Length + d;
-							var color = _colors[c];
+							var v0 = (index + Cubes.Vertices[triangles[t + 0]]) * _scale;
+							var v1 = (index + Cubes.Vertices[triangles[t + 1]]) * _scale;
+							var v2 = (index + Cubes.Vertices[triangles[t + 2]]) * _scale;
 
-							var triangles = Cubes.Triangles[d];
-							for (int t = 0; triangles[t] != -1; t += 3)
-							{
-								var v0 = (index + Cubes.Vertices[triangles[t + 0]]) * _scale;
-								var v1 = (index + Cubes.Vertices[triangles[t + 1]]) * _scale;
-								var v2 = (index + Cubes.Vertices[triangles[t + 2]]) * _scale;
-
-								meshBuilder.AddTriangle(
-									v0, v1, v2,
-									color, color, color
-								);
-							}
+							meshBuilder.AddTriangle(
+								v0, v1, v2,
+								color, color, color
+							);
 						}
 					}
 				}
-
-				meshBuilder.Overwrite(mesh);
-
-				meshCollider.sharedMesh = mesh; // Only because mesh has to be updated in physics cache
-
-				_isDirty = true;
 			}
+
+			meshBuilder.Overwrite(_cachedMesh);
+
+			if (TryGetComponent<MeshCollider>(out var meshCollider))
+			{	// Only because mesh has to be updated in physics cache
+				meshCollider.sharedMesh = _cachedMesh;
+			}
+
+			_isDirty = true;
 		}
 
 		private void ReadFromCurrentMesh()
 		{
-			if (TryGetComponent(out MeshFilter meshFilter))
+			_indices.Clear();
+			_colors.Clear();
+
+			var bounds = Range3Int.Empty;
+			var indicesNormals = new Dictionary<Vector3Int, HashSet<Vector3Int>>();
+
+			var normals = _cachedMesh.normals;
+			var vertices = _cachedMesh.vertices;
+			var colors = _cachedMesh.colors32;
+
+			const int kFaceVertexCount = 6;
+			for (int v = 0; v < vertices.Length; v += kFaceVertexCount)
 			{
-				var mesh = meshFilter.sharedMesh;
+				var v0 = vertices[v + 0];
+				var v1 = vertices[v + 1];
+				var v2 = vertices[v + 2];
 
-				_indices.Clear();
-				_colors.Clear();
+				var minDistance = Vector3.Magnitude(v1 - v0);
+				var maxDistance = Vector3.Magnitude(v0 - v2);
 
-				var bounds = Range3Int.Empty;
-				var indicesNormals = new Dictionary<Vector3Int, HashSet<Vector3Int>>();
+				_scale = Mathf.Min(_scale, minDistance);
 
-				var normals = mesh.normals;
-				var vertices = mesh.vertices;
-				var colors = mesh.colors32;
+				var normal = Vector3Int.RoundToInt(normals[v + 1]);
+				var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Mul(normal, 0.5f));
+				TryAddIndex(index);
 
-				const int kFaceVertexCount = 6;
-				for (int v = 0; v < vertices.Length; v += kFaceVertexCount)
+				if (Axes.All3D.TryIndexOf(normal, out int d))
 				{
-					var v0 = vertices[v + 0];
-					var v1 = vertices[v + 1];
-					var v2 = vertices[v + 2];
-
-					var minDistance = Vector3.Magnitude(v1 - v0);
-					var maxDistance = Vector3.Magnitude(v0 - v2);
-
-					_scale = Mathf.Min(_scale, minDistance);
-
-					var normal = Vector3Int.RoundToInt(normals[v + 1]);
-					var index = Vector3Int.RoundToInt((v2 + v0) * 0.5f / minDistance - Mathx.Mul(normal, 0.5f));
-					TryAddIndex(index);
-
-					if (Axes.All3D.TryIndexOf(normal, out int d))
-					{
-						var c = (_indices.Count - 1) * Axes.All3D.Length + d;
-						_colors[c] = colors[v + 1];
-					}
-
-					bounds.min = Mathx.Min(bounds.min, index);
-					bounds.max = Mathx.Max(bounds.max, index);
-
-					if (!indicesNormals.ContainsKey(index))
-						indicesNormals.Add(index, new HashSet<Vector3Int>());
-					indicesNormals[index].Add(normal);
+					var c = (_indices.Count - 1) * Axes.All3D.Length + d;
+					_colors[c] = colors[v + 1];
 				}
 
-				// Add fake indices inside mesh
-				for (int z = bounds.min.z; z < bounds.max.z; z++)
+				bounds.min = Mathx.Min(bounds.min, index);
+				bounds.max = Mathx.Max(bounds.max, index);
+
+				if (!indicesNormals.ContainsKey(index))
+					indicesNormals.Add(index, new HashSet<Vector3Int>());
+				indicesNormals[index].Add(normal);
+			}
+
+			// Add fake indices inside mesh
+			for (int z = bounds.min.z; z < bounds.max.z; z++)
+			{
+				for (int y = bounds.min.y; y < bounds.max.y; y++)
 				{
-					for (int y = bounds.min.y; y < bounds.max.y; y++)
+					for (int x = bounds.min.x; x < bounds.max.x; x++)
 					{
-						for (int x = bounds.min.x; x < bounds.max.x; x++)
+						var index = new Vector3Int(x, y, z);
+
+						if (indicesNormals.TryGetValue(index, out HashSet<Vector3Int> indexNormals))
 						{
-							var index = new Vector3Int(x, y, z);
-
-							if (indicesNormals.TryGetValue(index, out HashSet<Vector3Int> indexNormals))
+							foreach (var axis in Axes.Positive3D)
 							{
-								foreach (var axis in Axes.Positive3D)
+								if (!indexNormals.Contains(axis))
 								{
-									if (!indexNormals.Contains(axis))
-									{
-										var nextIndex = index + axis;
+									var nextIndex = index + axis;
 
-										if (!indicesNormals.ContainsKey(nextIndex))
-											indicesNormals.Add(nextIndex, new HashSet<Vector3Int>());
+									if (!indicesNormals.ContainsKey(nextIndex))
+										indicesNormals.Add(nextIndex, new HashSet<Vector3Int>());
 
-										TryAddIndex(nextIndex);
-									}
+									TryAddIndex(nextIndex);
 								}
 							}
 						}
@@ -202,23 +195,18 @@ namespace Common.Voxels
 
 		public void Save()
 		{
-			if (TryGetComponent(out MeshFilter meshFilter))
+			var path = AssetDatabase.GetAssetPath(_cachedMesh);
+
+			if (string.IsNullOrEmpty(path))
 			{
-				var mesh = meshFilter.sharedMesh;
+				const string DEFAULT_NAME = "";
+				const string DEFAULT_MESSAGE = "";
+				path = EditorUtility.SaveFilePanelInProject("Save Mesh", DEFAULT_NAME, "asset", DEFAULT_MESSAGE);
 
-				var path = AssetDatabase.GetAssetPath(mesh);
-
-				if (string.IsNullOrEmpty(path))
-				{
-					const string DEFAULT_NAME = "";
-					const string DEFAULT_MESSAGE = "";
-					path = EditorUtility.SaveFilePanelInProject("Save Mesh", DEFAULT_NAME, "asset", DEFAULT_MESSAGE);
-
-					AssetDatabase.CreateAsset(mesh, path);
-				}
-
-				AssetDatabase.SaveAssets();
+				AssetDatabase.CreateAsset(_cachedMesh, path);
 			}
+
+			AssetDatabase.SaveAssets();
 
 			_isDirty = false;
 		}
@@ -518,25 +506,6 @@ namespace Common.Voxels
 			return null;
 		}
 
-		public bool showGizmos;
-
-		private void OnDrawGizmos()
-		{
-			if (showGizmos)
-			{
-				var previousColor = Gizmos.color;
-				Gizmos.color = Color.red;
-				foreach (var index in _indices)
-				{
-					Gizmos.DrawSphere(index, _scale * 0.5f);
-				}
-				Gizmos.color = previousColor;
-			}
-		}
-
-		private Mesh m_CachedMesh;
-		private float m_CachedScale;
-
 		private void Update()
 		{
 			if (
@@ -544,21 +513,21 @@ namespace Common.Voxels
 				TryGetComponent(out MeshCollider meshCollider)
 			)
 			{
-				if (Utility.TryUpdate(ref m_CachedMesh, meshFilter.sharedMesh))
+				if (Utility.TryUpdate(ref _cachedMesh, meshFilter.sharedMesh))
 				{
-					if (m_CachedMesh == null)
+					if (_cachedMesh == null)
 					{
-						m_CachedMesh = CreateNewCurrentMesh();
+						_cachedMesh = CreateNewCurrentMesh();
 						WriteToCurrentMesh();
 					}
 					else
 					{
 						ReadFromCurrentMesh();
-						meshCollider.sharedMesh = m_CachedMesh;
+						meshCollider.sharedMesh = _cachedMesh;
 					}
 				}
 
-				if (Utility.TryUpdate(ref m_CachedScale, _scale))
+				if (Utility.TryUpdate(ref _cachedScale, _scale))
 				{
 					WriteToCurrentMesh();
 				}
@@ -577,7 +546,7 @@ namespace Common.Voxels
 
 			TryAddIndex(Vector3Int.zero);
 
-			m_CachedMesh = CreateNewCurrentMesh();
+			_cachedMesh = CreateNewCurrentMesh();
 			WriteToCurrentMesh();
 		}
 	}
